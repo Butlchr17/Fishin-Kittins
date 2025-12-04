@@ -1,0 +1,18 @@
+{
+  "name": "fishin_kittens",
+  "version": "1.0.0",
+  "description": "Twitch chat fishing cat overlay with persistent inventory",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.19.2",
+    "lowdb": "^1.0.0",
+    "socket.io": "^4.8.1",
+    "tmi.js": "^1.8.5"
+  },
+  "author": "Christopher Butler",
+  "license": "MIT"
+}

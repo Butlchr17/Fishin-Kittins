@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fishin' Kittens Overlay</title>
+  <style>
+    body { margin:0; padding:0; background:transparent; overflow:hidden; }
+    canvas { display:block; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.4.0/dist/pixi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/PixiPlugin.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<script>
+(async () => {
+  gsap.registerPlugin(PixiPlugin);
+
+  // ------ CONFIG ------
+  const CAT_SCALE = 2.5;
+  const WALK_ANIM_SPEED_MIN = 0.22;
+  const WALK_ANIM_SPEED_MAX = 0.38;
+  const WALK_SPEED_PX_PER_SEC_MIN = 80;
+  const WALK_SPEED_PX_PER_SEC_MAX = 180;
+  const IDLE_TIME_MS_MIN = 8000;
+  const IDLE_TIME_MS_MAX = 45000;
+  const WALK_LOOPS_MIN = 4;
+  const WALK_LOOPS_MAX = 15;
+  const DIRECTION_CHANGE_CHANCE = 0.40; // 40% chance to reverse direction when starting to walk
+  // -------------------
+
+  const app = new PIXI.Application({
+    width: 1920,
+    height: 1080,
+    transparent: true,
+    antialias: true,
+    resolution: window.devicePixelRatio || 1,
+    autoDensity: true
+  });
+  document.body.appendChild(app.canvas);
+
+  // Load sprite sheet
+  const sheetJson = await PIXI.Assets.load('cat_spritesheet.json');
+  const baseTexture = PIXI.BaseTexture.from(sheetJson.meta.image);
+  const spritesheet = new PIXI.Spritesheet(baseTexture, sheetJson);
+  await spritesheet.parse();
+
+  // Manual frame extraction
+  const walkTextures = Object.keys(spritesheet.textures)
+    .filter(key => key.includes('(walk)'))
+    .sort((a, b) => parseInt(a.match(/\(walk\)\s*(\d+)/)[1]) - parseInt(b.match(/\(walk\)\s*(\d+)/)[1]))
+    .map(key => spritesheet.textures[key]);
+
+  const fishTextures = Object.keys(spritesheet.textures)
+    .filter(key => key.includes('(fish)'))
+    .sort((a, b) => parseInt(a.match(/\(fish\)\s*(\d+)/)[1]) - parseInt(b.match(/\(fish\)\s*(\d+)/)[1]))
+    .map(key => spritesheet.textures[key]);
+
+  const socket = io();
+  const activeCats = {};
+
+  // Global movement ticker
+  app.ticker.add(() => {
+    const dt = app.ticker.elapsedMS / 1000;
+    Object.values(activeCats).forEach(cat => {
+      if (cat.state === 'walking') {
+        cat.container.x += cat.direction * cat.speed * dt;
+
+        // Bounce at edges
+        const margin = 200;
+        if (cat.container.x < -margin || cat.container.x > app.screen.width + margin) {
+          cat.direction *= -1;
+          cat.anim.scale.x = CAT_SCALE * cat.direction;
+        }
+      }
+    });
+  });
+
+  const scheduleNextWalk = (username) => {
+    const delay = IDLE_TIME_MS_MIN + Math.random() * (IDLE_TIME_MS_MAX - IDLE_TIME_MS_MIN);
+    setTimeout(() => startWalking(username), delay);
+  };
+
+  const startWalking = (username) => {
+    const cat = activeCats[username];
+    if (!cat || cat.state !== 'idle') return;
+
+    // 40% chance to change direction when starting to walk
+    if (Math.random() < DIRECTION_CHANGE_CHANCE) {
+      cat.direction *= -1;
+      cat.anim.scale.x = CAT_SCALE * cat.direction;
+    }
+
+    cat.state = 'walking';
+    cat.speed = WALK_SPEED_PX_PER_SEC_MIN + Math.random() * (WALK_SPEED_PX_PER_SEC_MAX - WALK_SPEED_PX_PER_SEC_MIN);
+    cat.loopCount = 0;
+    cat.maxLoops = WALK_LOOPS_MIN + Math.floor(Math.random() * (WALK_LOOPS_MAX - WALK_LOOPS_MIN + 1));
+
+    cat.anim.textures = walkTextures;
+    cat.anim.animationSpeed = WALK_ANIM_SPEED_MIN + Math.random() * (WALK_ANIM_SPEED_MAX - WALK_ANIM_SPEED_MIN);
+    cat.anim.loop = true;
+    cat.anim.play();
+
+    cat.anim.onLoop = () => {
+      cat.loopCount++;
+      if (cat.loopCount >= cat.maxLoops) {
+        stopWalking(username);
+      }
+    };
+  };
+
+  const stopWalking = (username) => {
+    const cat = activeCats[username];
+    if (!cat) return;
+
+    cat.state = 'idle';
+    cat.speed = 0;
+    cat.anim.gotoAndStop(0);
+    cat.anim.onLoop = null;
+
+    scheduleNextWalk(username);
+  };
+
+  socket.on('spawnCat', (data) => {
+    const username = data.username;
+
+    if (activeCats[username]) {
+      activeCats[username].container.destroy({ children: true });
+      delete activeCats[username];
+    }
+
+    const container = new PIXI.Container();
+
+    const anim = new PIXI.AnimatedSprite(walkTextures);
+    anim.anchor.set(0.5, 1);
+    anim.gotoAndStop(0); // static first frame
+
+    const direction = Math.random() < 0.5 ? 1 : -1;
+    anim.scale.x = CAT_SCALE * direction;
+    anim.scale.y = CAT_SCALE;
+
+    // Random color filter
+    const colorFilter = new PIXI.filters.ColorMatrixFilter();
+    anim.filters = [colorFilter];
+    colorFilter.hue((Math.random() - 0.5) * 360, false);
+    colorFilter.saturate(0.4 + Math.random() * 0.9, false);
+    if (Math.random() < 0.06) {
+      colorFilter.brightness(1.7, false);
+      colorFilter.contrast(1.8, false);
+    }
+
+    const nameText = new PIXI.Text(username, {
+      fontFamily: 'Roobert, Arial, sans-serif',
+      fontSize: 32,
+      fontWeight: 'bold',
+      fill: data.color || 0xffffff,
+      stroke: '#000000',
+      strokeThickness: 6,
+      dropShadow: true,
+      dropShadowDistance: 3
+    });
+    nameText.anchor.set(0.5, 0.5);
+
+    container.addChild(anim);
+    container.addChild(nameText);
+    nameText.y = - (anim.height / 2 + nameText.height / 2 + 14);
+
+    const laneOffset = 120 + Math.random() * 400;
+    container.y = app.screen.height - laneOffset;
+    container.x = 100 + Math.random() * (app.screen.width - 200);
+
+    app.stage.addChild(container);
+
+    activeCats[username] = {
+      container,
+      anim,
+      state: 'idle',
+      direction,
+      speed: 0
+    };
+
+    scheduleNextWalk(username);
+  });
+
+  socket.on('startFishing', (data) => {
+    const username = data.username;
+    const cat = activeCats[username];
+    if (!cat) return;
+
+    const wasWalking = cat.state === 'walking';
+    const savedSpeed = cat.speed;
+    const savedAnimSpeed = cat.anim.animationSpeed;
+    const savedLoopCount = cat.loopCount || 0;
+    const savedMaxLoops = cat.maxLoops || 0;
+    const savedOnLoop = cat.anim.onLoop;
+
+    cat.state = 'fishing';
+    cat.speed = 0;
+    cat.anim.onLoop = null;
+
+    cat.anim.textures = fishTextures;
+    cat.anim.loop = false;
+    cat.anim.animationSpeed = 0.3;
+    cat.anim.gotoAndPlay(0);
+
+    cat.anim.onComplete = () => {
+      cat.anim.textures = walkTextures;
+
+      if (wasWalking && savedLoopCount < savedMaxLoops) {
+        cat.state = 'walking';
+        cat.speed = savedSpeed;
+        cat.anim.animationSpeed = savedAnimSpeed;
+        cat.loopCount = savedLoopCount;
+        cat.maxLoops = savedMaxLoops;
+        cat.anim.loop = true;
+        cat.anim.play();
+        cat.anim.onLoop = savedOnLoop || (() => {
+          cat.loopCount++;
+          if (cat.loopCount >= cat.maxLoops) stopWalking(username);
+        });
+      } else {
+        cat.state = 'idle';
+        cat.anim.gotoAndStop(0);
+        scheduleNextWalk(username);
+      }
+    };
+  });
+
+  socket.on('caughtItem', (data) => {
+    const cat = activeCats[data.username];
+    if (!cat) return;
+
+    const text = new PIXI.Text(`${data.emoji} ${data.item}!`, {
+      fontFamily: 'Roobert, Arial, sans-serif',
+      fontSize: 52,
+      fill: data.color || 0xffffff,
+      stroke: '#000000',
+      strokeThickness: 9,
+      dropShadow: true,
+      dropShadowDistance: 5
+    });
+    text.anchor.set(0.5, 0.5);
+    text.y = - (cat.anim.height / 2 + 70);
+
+    cat.container.addChild(text);
+
+    const targetScale = data.isRare ? 4.3 : 2.4;
+
+    gsap.fromTo(text,
+      { pixi: { scale: 0, rotation: Math.random() * 60 - 30 } },
+      {
+        pixi: { scale: targetScale },
+        rotation: 0,
+        y: text.y - 400,
+        alpha: 0,
+        duration: 4.2,
+        ease: "elastic.out(1, 0.25)",
+        onComplete: () => text.destroy()
+      }
+    );
+  });
+
+  console.log('Fishin\' Kittens overlay ready — waiting for cats to spawn...');
+})();
+
+</script>
+</body>
+</html>
