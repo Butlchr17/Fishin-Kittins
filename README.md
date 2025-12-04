@@ -23,7 +23,7 @@ A chaotic, persistent, Twitch chat overlay where viewers spawn their own fishing
 ## Setup (5 minutes)
 
 ```bash
-git clone https://github.com/yourusername/fishin_kittens.git
+git clone https://github.com/Butlchr17/fishin_kittens.git
 cd fishin_kittens
 npm install
 ```
