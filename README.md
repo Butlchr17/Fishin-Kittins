@@ -1,5 +1,7 @@
 # Fishin' Kittens
 
+# STILL IN DEVELOPMENT!
+
 A chaotic, persistent, Twitch chat overlay where viewers spawn their own fishing cat that patrols the bottom of the screen, randomly walks in bursts, changes direction, idles completely still, and can be commanded to fish with `!fish`. Every viewer keeps their inventory forever.
 
 - Custom Aseprite sprite sheets (walk + fish animations)
